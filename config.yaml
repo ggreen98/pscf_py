@@ -1,0 +1,351 @@
+# config.yaml
+# Configuration for PSCF data prep and analysis.
+# Applies to both CDPHE (EPA AQS) and Boulder AIR data sources.
+
+# ---------------------------------------------------------------------------
+# Analysis parameters — edit here to switch species or date range
+# ---------------------------------------------------------------------------
+analysis:
+  species: "ethane_nox_ratio"    # one of: "O3", "NO", "NO2", "NOx", or a VOC compound name matching a BA column
+                    # (e.g. "ethane", "propane" — see ba.species_config.voc.sites; BA only, no
+                    # CDPHE equivalent). Quotes required; NO/YES are YAML booleans
+  method: "cwt"   # one of "pscf" or "cwt" — default weighting scheme weighting_function() uses
+                   # when PSCF.pscf()/PSCF.cwt() don't already say explicitly which one they are
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  cdphe_data_dir: /Users/gabegreenberg/Documents/GitHub/Front_Range_Ozone_Study/CDPHE_DATA
+  ba_data_dir: /Users/gabegreenberg/Boulder_AIR/BoulderAIR_data
+  trajectory_dir: "/Users/gabegreenberg/Boulder_AIR/Front Range Ozone Study/Trajectory_Files"
+  output_dir: "/Users/gabegreenberg/Boulder_AIR/Front Range Ozone Study/pscf_py/output"
+
+# ---------------------------------------------------------------------------
+# Trajectory files
+# ---------------------------------------------------------------------------
+trajectories:
+  # Subdirectory pattern inside trajectory_dir
+  # Full path: {trajectory_dir}/Trajectory_Files_{YYYY}/{site_id}/{site_id}_{YYYYMMDD}_{HH}
+  year_dir_prefix: Trajectory_Files_
+  filename_pattern: "{site}_{YYYYMMDD}_{HH}"   # HH is zero-padded UTC hour (00–23)
+  hours_back: -6                                 # back-trajectory length in hours
+  format: HYSPLIT                                # single-trajectory endpoint files
+  # Endpoint column positions (fixed-width, space-separated after header):
+  # traj_num | met_grid | year | month | day | hour | minute | traj_age | lat | lon | height | pressure
+  endpoint_columns:
+    - traj_num
+    - met_grid
+    - year
+    - month
+    - day
+    - hour
+    - minute
+    - traj_age   # hours relative to start (0, -1, -2, ... -12)
+    - lat
+    - lon
+    - height_m_agl
+    - pressure_hpa
+  available_years: [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+# ---------------------------------------------------------------------------
+# CDPHE / EPA AQS data
+# ---------------------------------------------------------------------------
+cdphe:
+  description: >
+    Hourly ozone from EPA AQS via CDPHE. Files already contain both local and
+    GMT timestamps. Use the GMT columns — no conversion needed.
+  time_zone: UTC
+  timestamp_columns:
+    date: date_gmt    # YYYY-MM-DD
+    time: time_gmt    # HH:MM  (start of 1-hour averaging window, UTC)
+  # Combine date_gmt + time_gmt -> UTC timestamp, left-label convention
+  # (label 07:00 UTC = average over 07:00–08:00 UTC)
+  concentration_column: sample_measurement
+  concentration_units: ppm
+  concentration_units_target: ppb
+  ppm_to_ppb_factor: 1000
+  file_pattern: "{site}_{species}_data.csv"
+  o3_sites:
+    - AURE    # Aurora East
+    - BOUR    # Boulder Reservoir  (same location as BA site BRZ)
+    - CAMP    # CAMP (Denver)
+    - CASA    # La Casa
+    - CHAT    # Chatfield Park
+    - EVG     # Evergreen
+    - FTC     # Fort Collins CSU
+    - FTCW    # Fort Collins West
+    - GRET    # Greeley Weld Co.
+    - HLD     # Highland (Centennial)
+    - NREL    # NREL South Table Mtn.
+    - PAO     # Platteville Atmospheric Observatory (decommissioned Feb 2024)
+    - RFN     # Rocky Flats North
+    - ROMO    # Rocky Mountain NP
+    - WBY     # Welby
+  no_sites:
+    - CAMP
+    - CASA
+    - I25DEN
+    - I25GLO
+    - PAO
+    - RFN
+    - ROMO    # NO only — no NO2 file available
+    - WBY
+  no2_sites:
+    - CAMP
+    - CASA
+    - I25DEN
+    - I25GLO
+    - PAO
+    - RFN
+    - WBY
+  nox_sites:              # sites with both NO and NO2 (required to compute NOx = NO + NO2)
+    - CAMP
+    - CASA
+    - I25DEN
+    - I25GLO
+    - PAO
+    - RFN
+    - WBY
+
+# ---------------------------------------------------------------------------
+# Boulder AIR (BA) data
+# ---------------------------------------------------------------------------
+ba:
+  description: >
+    Minute-resolution ozone from Boulder AIR monitoring network. Unix timestamps
+    in UTC (tz=0 in file header). Must be resampled to hourly before pairing
+    with trajectories. Use left-closed, left-labeled bins to match AQS convention.
+  time_zone: UTC
+  timestamp_column: time        # Unix epoch seconds (UTC)
+  concentration_units: ppb      # already in ppb — no conversion needed
+  header_rows: 2                # row 0 = metadata (e.g. "o3,tz=0,v=1.1"), row 1 = column names
+  resample_rule: "1h"           # pandas resample freq; left-label, left-closed
+  resample_method: mean
+  # NOTE: User stated a few early years of BRZ data were recorded in MST (UTC-7).
+  # The current files in ba_data_dir/BRZ/ozone/ all show tz=0 — verify before
+  # using any older BRZ data sourced from elsewhere.
+  # mst_offset_hours: -7          # MST = UTC - 7 (no DST adjustment needed)
+  # species_config: keyed by species name (match analysis.species exactly, or "voc" for any VOC compound)
+  # Each entry has:
+  #   subdir  : default subdirectory under {ba_data_dir}/{site}/
+  #   col     : column to extract (null = auto-infer from metadata row; works for ozone only)
+  #   sites   : dict of site_id -> per-site overrides (subdir, col, utc_offset_hours)
+  # For VOC compounds (ethane, propane, etc.) set analysis.species to the compound name;
+  # ba_read_in will look up the "voc" entry and use species.lower() as the column.
+  species_config:
+    "O3":
+      subdir: ozone
+      col: ~          # auto-inferred from metadata row ("o3,tz=0,...")
+      sites:
+        BSE: {}       # Broomfield Soaring Eagle Park
+        CCF: {}       # Commerce City Fixed Site
+        ECC: {}       # Erie Community Center
+        LLG: {}       # Longmont Lykins Gulch
+        LMA: {}       # Longmont (ozone only site)
+        LNM: {}       # Longmont North Met
+        LUR: {}       # Longmont Union Reservoir
+        # BRZ excluded — its ozone record duplicates CDPHE site BOUR
+    "NOx":
+      subdir: nox
+      col: nox        # "nox" column = NO + NO2 already summed
+      sites:
+        BRZ: {}
+        LNM: {}
+        LUR: {subdir: met}
+        BSE: {subdir: met}    # NOx stored in met/ subdir at these sites
+        CCF: {subdir: met}
+    "NO":
+      subdir: nox
+      col: "no"       # quoted — bare no is a YAML boolean
+      sites:
+        BRZ: {}
+        LNM: {}
+        BSE: {subdir: met}
+        CCF: {subdir: met}
+    "NO2":
+      subdir: met
+      col: no2
+      sites:
+        CCF: {}       # only CCF has BA NO2 in met/
+    voc:
+      subdir: voc
+      col: ~          # set by ba_read_in to species.lower() (e.g. "ethane")
+      sites:
+        BLV: {}
+        BNP: {}
+        BRZ: {}  # legacy 2017-2019 files in voc_2017_2019/ are MST
+        BSE: {}
+        CCF: {}       # has voc/ and voc2/ per quarter — read_ba_data merges horizontally
+        CCM: {}
+        ECC: {}
+        LNM: {}
+        LUR: {}
+
+# ---------------------------------------------------------------------------
+# Site coordinates (used for trajectory pairing and grid lookup)
+# ---------------------------------------------------------------------------
+sites:
+  # CDPHE sites
+  AURE:  {lat: 39.638529, lon: -104.569074, source: cdphe}
+  BOUR:  {lat: 40.070014, lon: -105.220231, source: cdphe}
+  CAMP:  {lat: 39.751184, lon: -104.987625, source: cdphe}
+  CASA:  {lat: 39.779460, lon: -105.005124, source: cdphe}
+  CHAT:  {lat: 39.534488, lon: -105.070358, source: cdphe}
+  EVG:   {lat: 39.620408, lon: -105.338720, source: cdphe}
+  FTC:   {lat: 40.577470, lon: -105.078920, source: cdphe}
+  FTCW:  {lat: 40.592543, lon: -105.141122, source: cdphe}
+  GRET:  {lat: 40.386368, lon: -104.737440, source: cdphe}
+  HLD:   {lat: 39.567887, lon: -104.957193, source: cdphe}
+  NREL:  {lat: 39.743207, lon: -105.179093, source: cdphe}
+  PAO:   {lat: 40.181610, lon: -104.726130, source: cdphe}
+  RFN:   {lat: 39.912799, lon: -105.188587, source: cdphe}
+  ROMO:  {lat: 40.278000, lon: -105.546000, source: cdphe}
+  WBY:   {lat: 39.838199, lon: -104.949840, source: cdphe}
+  # Boulder AIR sites
+  BRZ:   {lat: 40.070000, lon: -105.220000, source: ba}
+  BSE:   {lat: 39.984000, lon: -105.037000, source: ba}
+  CCF:   {lat: 39.812590, lon: -104.943910, source: ba}
+  ECC:   {lat: 40.040220, lon: -105.052080, source: ba}
+  LLG:   {lat: 40.160700, lon: -105.146140, source: ba}
+  LUR:   {lat: 40.176000, lon: -105.048000, source: ba}
+
+# ---------------------------------------------------------------------------
+# Reference cities — map context only, not analysis sites. Used by ResultMap
+# to label familiar landmarks on the plotted grid.
+# ---------------------------------------------------------------------------
+reference_cities:
+  Denver:           {lat: 39.7392, lon: -104.9903}
+  Boulder:          {lat: 40.0150, lon: -105.2705}
+  Fort Collins:     {lat: 40.5853, lon: -105.0844}
+  Greeley:          {lat: 40.4233, lon: -104.7091}
+  Longmont:         {lat: 40.1672, lon: -105.1019}
+  Colorado Springs: {lat: 38.8339, lon: -104.8214}
+
+# ---------------------------------------------------------------------------
+# PSCF parameters (matching traPSA defaults)
+# ---------------------------------------------------------------------------
+pscf:
+  #mode: "multi_site"          # one of "single_site" or "multi_site"
+  criterion_type: "percentile" # one of "percentile" or "value"
+  criterion: .8               # "percentile": 0-1 fraction (0.8 = 80th percentile); "value": raw ppb threshold, applied per site
+  per_site_threshold: true     # each site gets its own C_s, not a network-wide value
+  trajectory_hours: 12         # hours of back trajectory to use
+  cwt_statistic: "median"      # one of "mean" or "median" — per-cell CWT aggregation.
+                                # median is more robust to outlier hours (e.g. a ratio
+                                # metric spiking when its denominator is near zero).
+  # Separate weighting schemes per analysis method — openair's trajLevel()
+  # source (verified directly, see multi_site_pscf_notes.md §6) uses different
+  # tier comparisons for pscf vs cwt, not just different numbers:
+  #   pscf: tiers are MULTIPLES of the grid average (comparison: "relative")
+  #         n_ij > tier_bounds[k] * avg -> tier_weights[k]
+  #   cwt:  tiers are FIXED endpoint-count thresholds (comparison: "absolute")
+  #         n_ij > tier_bounds[k]       -> tier_weights[k]
+  # Selected by analysis.method, or overridden per-call via weighting_function(method=...).
+  weight_function:
+    pscf:
+      weighting: "standard"        # one of "standard" (graduated tiers), "binary" (hard cutoff), "ss_scaled", "ss_scaled_balanced", "ss_scaled_pessimistic" to scale the probuility by sample size 95% CI's
+      weighting_value: 20           # endpoint-count cutoff; only used when weighting: "binary" or "ss_scaled_balanced" where its used as "k", a calibration value
+      comparison: "relative"
+      tier_bounds: [2, 1, 0.5]
+      tier_weights: [1.0, 0.75, 0.5]
+      min_weight: 0.15
+    cwt:
+      weighting: "binary"
+      weighting_value: 20
+      comparison: "absolute"
+      tier_bounds: [80, 20, 10]
+      tier_weights: [1.0, 0.7, 0.42]
+      min_weight: 0.05
+  grid:
+    lat_min: 37.0
+    lat_max: 41.0
+    lon_min: -109.0
+    lon_max: -102.0
+    dlat: 0.027      # ~3 km
+    dlon: 0.035      # ~3 km
+
+# ---------------------------------------------------------------------------
+# Map / plotting (ResultMap) — kept top-level, not nested under pscf:, since
+# ResultMap is generic over any 2D result grid (PSCF today, CWT/SQTBA later).
+# ---------------------------------------------------------------------------
+map:
+  title: "Multi-Site {method} — {species}"  # {method} -> "PSCF"/"CWT", {species} -> analysis.species
+  caption: ~                             # null -> auto-built from pscf criterion/weighting (default_caption())
+  legend_caption:
+    pscf: "PSCF probability"
+    cwt: ~   # null -> auto-built from pscf.cwt_statistic ("Mean (ppb)" / "Median (ppb)")
+  city_label_font_size: 22   # px — reference city name labels (always visible, not hover tooltips)
+  zoom_start: 7
+  title_font_size: 32     # px — title banner text
+  caption_font_size: 26   # px — supplemental caption text under the title
+  legend_scale: 1.8       # multiplier applied to branca's fixed-size legend (color bar + tick/caption text)
+  scale_bar_font_size: 16 # px — distance scale bar text (NOT a transform/scale, which would distort its accuracy)
+  # The weighting scheme is internal/technical detail most viewers don't need
+  # on the map — hidden from the caption by default. Set true to show it.
+  show_weighting: false
+  # Only matters if show_weighting is also true. "relative"/"absolute"
+  # thresholds is accurate but jargon most viewers won't recognize — off by
+  # default. Set true to additionally spell out that PSCF's tiers are
+  # multiples of the grid average while CWT's are fixed endpoint counts,
+  # instead of just "Weighting: standard" for both.
+  show_weighting_detail: false
+  # Templates used by default_caption() to build the auto caption when
+  # map.caption above is left null. {value}/{criterion_type} are filled in
+  # from pscf.criterion / pscf.criterion_type. {weighting}/{comparison} come
+  # from pscf.weight_function.<method>.weighting / .comparison — comparison
+  # is only used by weighting_detailed (see show_weighting_detail above).
+  caption_templates:
+    criterion_percentile: "Criterion: {value:.0f}th percentile"
+    criterion_value: "Criterion: {value} ({criterion_type})"
+    weighting: "Weighting: {weighting}"
+    weighting_detailed: "Weighting: {weighting} ({comparison} thresholds)"
+    separator: " &nbsp;|&nbsp; "
+
+# ---------------------------------------------------------------------------
+# Column mapping (TrajectoryDataset)
+# Maps whatever column names the raw pollution/trajectory dataframes actually
+# use (left side) to the canonical names the rest of the pipeline expects
+# (right side — must match the Output schema / Trajectory schema below).
+# data_checker() validates against the left side (raw); prepare_data() renames
+# left -> right. Edit the left side to match your own raw data if it differs.
+# ---------------------------------------------------------------------------
+column_mapping:
+  pollution:
+    site_id: site_id
+    timestamp_utc: timestamp_utc
+    ppb: ppb   # project_specific_functions.py readers already output 'ppb' directly
+  trajectory:
+    site_id: site_id
+    timestamp_utc: timestamp_utc
+    lat: lat
+    lon: lon
+    traj_age: traj_age
+
+# ---------------------------------------------------------------------------
+# Output schema
+# All data sources must produce rows in this form before PSCF accumulation:
+#   site_id       : str              (e.g. "FTC", "BRZ")
+#   timestamp_utc : datetime64[UTC]  (start of 1-hour window, UTC)
+#   species       : str              (e.g. "O3", "NO", "NO2")
+#   ppb           : float64
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Trajectory schema
+# This is the interface TrajectoryDataset depends on — any trajectory reader
+# (HYSPLIT or otherwise) must produce rows in this form before pairing with
+# concentration data. Swapping in a different back-trajectory model/met driver
+# only requires a new reader that outputs this schema; TrajectoryDataset,
+# Grid, and PSCF/CWT don't need to change.
+#   site_id       : str              (e.g. "FTC", "BRZ")
+#   timestamp_utc : datetime64[UTC]  (trajectory release hour — same label
+#                                     convention as the paired concentration row)
+#   traj_age      : float            (hours relative to release: 0 = receptor,
+#                                     negative = back in time)
+#   lat           : float64          (endpoint latitude)
+#   lon           : float64          (endpoint longitude)
+# Optional, carried along but not required by pairing/binning logic:
+#   height_m_agl  : float64
+#   pressure_hpa  : float64
+# ---------------------------------------------------------------------------
